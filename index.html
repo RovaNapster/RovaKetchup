@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://emojigraph.org/media/apple/tomato_1f345.png">
+    <link rel="manifest" href="manifest.json">
+    <title>Ketchup PMS - Flagship</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: { colors: { oled: '#030303', ketchup: '#e63946', glass: 'rgba(255, 255, 255, 0.05)', matrix: '#39ff14' } } }
+        }
+    </script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=Share+Tech+Mono&display=swap');
+        
+        body { 
+            font-family: 'Inter', -apple-system, sans-serif; -webkit-tap-highlight-color: transparent;
+            background-color: #f8fafc; transition: background-color 0.4s ease;
+            overscroll-behavior-y: none; padding-bottom: 40px;
+        }
+        .dark body { background-color: #030303; color: #ffffff; }
+
+        .premium-glass {
+            background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+        }
+        .dark .premium-glass {
+            background: rgba(20, 20, 22, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn-ketchup { background: linear-gradient(145deg, #ff4d4d, #d62828); box-shadow: 0 15px 35px rgba(214, 40, 40, 0.3), inset 0 2px 5px rgba(255, 255, 255, 0.4); transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .btn-ketchup:active { transform: scale(0.94); box-shadow: 0 5px 15px rgba(214, 40, 40, 0.2); }
+        .btn-success { background: linear-gradient(145deg, #10b981, #059669); box-shadow: 0 15px 35px rgba(16, 185, 129, 0.3); }
+
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 24px; width: 24px; border-radius: 50%; background: #e63946; cursor: pointer; margin-top: -10px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; cursor: pointer; background: #e2e8f0; border-radius: 3px; }
+        .dark input[type=range]::-webkit-slider-runnable-track { background: #333; }
+        
+        .terminal-font { font-family: 'Share Tech Mono', monospace; }
+        .matrix-glow { text-shadow: 0 0 8px rgba(57, 255, 20, 0.6); }
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { AreaChart, Area, ResponsiveContainer, XAxis, Tooltip } = Recharts;
+
+        // Säker laddning av databasen
+        const safeLoadLogs = () => {
+            try {
+                const data = localStorage.getItem('rovaLogs');
+                return data ? JSON.parse(data) : [];
+            } catch (error) {
+                console.error("Databas korrupt, återställer.", error);
+                return [];
+            }
+        };
+
+        const App = () => {
+            // Theme initialization (Säkerställer minne)
+            const [isDark, setIsDark] = useState(() => {
+                const savedTheme = localStorage.getItem('rovaTheme');
+                return savedTheme !== null ? savedTheme === 'dark' : true; // Dark som standard
+            });
+
+            const [logs, setLogs] = useState(safeLoadLogs());
+            const [hasDosed, setHasDosed] = useState(false);
+            const [doseInfo, setDoseInfo] = useState(null);
+            
+            const [mood, setMood] = useState(7);
+            const [spotting, setSpotting] = useState(false);
+            const [pmsTags, setPmsTags] = useState([]);
+            const availableTags = ['🤯 Huvudvärk', '⚡ Kramper', '🍫 Cravings', '😴 Trött', '💧 Svullen'];
+
+            // Admin State
+            const [clickCount, setClickCount] = useState(0);
+            const [showTerminal, setShowTerminal] = useState(false);
+            const [adminAuthed, setAdminAuthed] = useState(false);
+            const [adminPwd, setAdminPwd] = useState("");
+            const clickTimer = useRef(null);
+
+            // Applicera tema
+            useEffect(() => {
+                const root = document.documentElement;
+                if (isDark) {
+                    root.classList.add('dark');
+                    localStorage.setItem('rovaTheme', 'dark');
+                } else {
+                    root.classList.remove('dark');
+                    localStorage.setItem('rovaTheme', 'light');
+                }
+                document.querySelector('meta[name="theme-color"]').setAttribute('content', isDark ? '#030303' : '#f8fafc');
+                setTimeout(() => lucide.createIcons(), 50);
+            }, [isDark, showTerminal]);
+
+            // --- STABIL LOGGNING OCH GPS ---
+            const handleDose = async () => {
+                if (hasDosed) return;
+                if (navigator.vibrate) navigator.vibrate([40, 60, 40]); 
+                
+                const time = new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+                const date = new Date().toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+                
+                setHasDosed(true);
+                setDoseInfo({ time: time, loc: "Söker plats..." });
+
+                let finalLocation = "📍 Plats okänd";
+
+                if ("geolocation" in navigator) {
+                    try {
+                        const position = await new Promise((resolve, reject) => {
+                            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000, maximumAge: 60000 });
+                        });
+                        
+                        const { latitude, longitude } = position.coords;
+                        
+                        // Säker Fetch (Undvik krasch om API är nere)
+                        try {
+                            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+                            if(res.ok) {
+                                const data = await res.json();
+                                finalLocation = `📍 ${data.address.city || data.address.town || data.address.village || "Lokaliserad"}`;
+                            } else {
+                                finalLocation = `📍 ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+                            }
+                        } catch (fetchErr) {
+                            finalLocation = `📍 ${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+                        }
+                    } catch (geoErr) {
+                        console.warn("GPS fel:", geoErr);
+                        finalLocation = "📍 Krypterad position";
+                    }
+                } else {
+                    finalLocation = "📍 Offline";
+                }
+
+                setDoseInfo({ time: time, loc: finalLocation });
+
+                // Spara till DB på ett säkert sätt
+                const newEntry = { date, time, loc: finalLocation, mood: parseInt(mood), spotting, pms: pmsTags };
+                const updatedLogs = [...logs, newEntry];
+                setLogs(updatedLogs);
+                try {
+                    localStorage.setItem('rovaLogs', JSON.stringify(updatedLogs));
+                } catch(e) {
+                    console.error("Kunde inte spara till minnet", e);
+                }
+            };
+
+            const toggleTag = (tag) => {
+                if (navigator.vibrate) navigator.vibrate(15);
+                setPmsTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+            };
+
+            // --- ADMIN LOGIC ---
+            const handleLogoClick = () => {
+                setClickCount(prev => prev + 1);
+                if (clickTimer.current) clearTimeout(clickTimer.current);
+                clickTimer.current = setTimeout(() => setClickCount(0), 1500);
+                if (clickCount === 3) { 
+                    if (navigator.vibrate) navigator.vibrate([100, 50, 200]);
+                    setShowTerminal(true);
+                    setClickCount(0);
+                }
+            };
+
+            const nukeDatabase = () => {
+                if(confirm("CRITICAL WARNING: Radera all sparad data?")) {
+                    localStorage.removeItem('rovaLogs');
+                    setLogs([]);
+                    alert("DATABASE NUKED");
+                }
+            };
+
+            // Förbered data för grafen
+            const chartData = logs.length > 0 
+                ? logs.slice(-7).map(l => ({ name: l.date.split(" ")[0], val: l.mood }))
+                : [{name: 'Mån', val: 5}, {name: 'Tis', val: 5}]; // Placeholder om tomt
+
+            // ==========================================
+            // HACKER TERMINAL VIEW
+            // ==========================================
+            if (showTerminal) {
+                return (
+                    <div className="fixed inset-0 bg-black text-matrix terminal-font p-6 overflow-y-auto z-[9999]">
+                        {!adminAuthed ? (
+                            <div className="flex flex-col h-full justify-center max-w-md mx-auto">
+                                <p className="mb-4 matrix-glow">--- ROVA ENCRYPTION ENGINE ---<br/>v.3.0 [STABLE]</p>
+                                <form onSubmit={(e) => { e.preventDefault(); if (adminPwd === "rova6666") setAdminAuthed(true); else { alert("ACCESS DENIED"); setAdminPwd(""); } }} className="flex flex-col gap-4 mt-8">
+                                    <label className="text-sm">ENTER PASSKEY<span className="blink">_</span></label>
+                                    <input type="password" value={adminPwd} onChange={e => setAdminPwd(e.target.value)} className="bg-transparent border-b-2 border-matrix outline-none text-matrix matrix-glow text-xl p-2 font-mono" autoFocus/>
+                                    <button type="submit" className="border border-matrix p-3 hover:bg-matrix hover:text-black transition-colors mt-4">DECRYPT_</button>
+                                    <button type="button" onClick={() => setShowTerminal(false)} className="text-gray-500 mt-8 text-xs underline">[ ABORT ]</button>
+                                </form>
+                            </div>
+                        ) : (
+                            <div className="max-w-2xl mx-auto pb-10">
+                                <div className="flex justify-between items-start mb-6 border-b border-matrix pb-4">
+                                    <div><p className="text-xl matrix-glow font-bold">ROVA_SYS_ADMIN</p></div>
+                                    <button onClick={() => {setShowTerminal(false); setAdminAuthed(false); setAdminPwd("");}} className="border border-matrix px-3 py-1 text-xs hover:bg-matrix hover:text-black">EXIT_</button>
+                                </div>
+                                <p className="mb-2 matrix-glow">> RAW_LOCALSTORAGE_DUMP:</p>
+                                <div className="bg-[#051005] border border-[#1a3a1a] p-4 text-xs overflow-x-auto mb-8 text-green-300">
+                                    <pre>{JSON.stringify(logs, null, 2)}</pre>
+                                </div>
+                                <button onClick={nukeDatabase} className="w-full border border-red-600 text-red-500 p-4 hover:bg-red-900 hover:text-white font-bold transition-colors">[ EXECUTE: NUKE_DATABASE ]</button>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
+            // ==========================================
+            // MAIN UI
+            // ==========================================
+            return (
+                <div className="min-h-screen px-4 pt-safe pb-20">
+                    <header className="flex justify-between items-center py-6 mb-2">
+                        <div onClick={handleLogoClick} className="cursor-pointer select-none">
+                            <h1 className="text-3xl font-black tracking-tighter text-slate-900 dark:text-white flex items-center gap-2">
+                                <span className="text-ketchup drop-shadow-md">🍅</span> KETCHUP
+                            </h1>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-9">PMS & Slinda Protocol</p>
+                        </div>
+                        <button onClick={() => { setIsDark(!isDark); if(navigator.vibrate) navigator.vibrate(20); }} className="p-3 rounded-full premium-glass active:scale-90 smooth">
+                            <i data-lucide={isDark ? "sun" : "moon"} className={`w-5 h-5 ${isDark ? 'text-yellow-400' : 'text-slate-700'}`}></i>
+                        </button>
+                    </header>
+
+                    <div className="space-y-5">
+                        
+                        {/* Huvudknapp */}
+                        <div className={`premium-glass rounded-[2rem] p-2 smooth`}>
+                            <button onClick={handleDose} className={`w-full h-40 rounded-[1.5rem] flex flex-col items-center justify-center gap-2 ${hasDosed ? 'btn-success' : 'btn-ketchup'} text-white relative overflow-hidden`}>
+                                <i data-lucide={hasDosed ? "check-circle-2" : "pill"} className="w-10 h-10 drop-shadow-md z-10"></i>
+                                <span className="text-2xl font-black tracking-wide drop-shadow-md z-10">{hasDosed ? 'LOGGAD' : 'TA DOSEN'}</span>
+                                {doseInfo && (
+                                    <div className="flex flex-col items-center mt-1 z-10">
+                                        <span className="text-sm font-bold opacity-90">{doseInfo.time}</span>
+                                        <span className="text-xs opacity-75">{doseInfo.loc}</span>
+                                    </div>
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Status Grid */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="premium-glass p-5 rounded-[1.5rem]">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Dagsform</p>
+                                <p className="text-4xl font-black text-ketchup">{mood}<span className="text-lg text-slate-400">/10</span></p>
+                            </div>
+                            <div className="premium-glass p-5 rounded-[1.5rem] flex flex-col justify-between">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Spotting</p>
+                                <button onClick={() => { setSpotting(!spotting); if(navigator.vibrate) navigator.vibrate(20); }} className={`w-full py-3 rounded-xl font-bold text-sm transition-colors ${spotting ? 'bg-ketchup text-white' : 'bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-slate-300'}`}>
+                                    {spotting ? 'Ja, idag 🩸' : 'Nej, clean ✨'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Interaktiv Logg */}
+                        <div className="premium-glass p-6 rounded-[2rem]">
+                            <h3 className="font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2"><i data-lucide="activity" className="w-5 h-5 text-ketchup"></i> System-check</h3>
+                            <input type="range" min="1" max="10" value={mood} onChange={(e) => setMood(e.target.value)} />
+                            <div className="mt-6">
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">PMS & Symtom</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {availableTags.map(tag => (
+                                        <div key={tag} onClick={() => toggleTag(tag)} className={`px-4 py-2 rounded-full text-sm font-medium cursor-pointer transition-all border ${pmsTags.includes(tag) ? 'bg-ketchup border-ketchup text-white shadow-lg shadow-red-500/30' : 'bg-transparent border-slate-300 dark:border-white/10 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5'}`}>{tag}</div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Historik/Trendgraf */}
+                        <div className="premium-glass p-6 rounded-[2rem]">
+                            <h3 className="font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2"><i data-lucide="trending-up" className="w-5 h-5 text-ketchup"></i> Humörtrend</h3>
+                            <div className="h-32 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={chartData}>
+                                        <defs>
+                                            <linearGradient id="colorMood" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#e63946" stopOpacity={0.5}/>
+                                                <stop offset="95%" stopColor="#e63946" stopOpacity={0}/>
+                                            </linearGradient>
+                                        </defs>
+                                        <XAxis dataKey="name" hide />
+                                        <Tooltip contentStyle={{backgroundColor: isDark ? '#111' : '#fff', border: 'none', borderRadius: '8px'}} itemStyle={{color: '#e63946', fontWeight: 'bold'}} />
+                                        <Area type="monotone" dataKey="val" stroke="#e63946" strokeWidth={3} fillOpacity={1} fill="url(#colorMood)" />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
